@@ -6,10 +6,11 @@ function love.conf(t)
     t.window.resizable = true
     t.window.minwidth, t.window.minheight = 960, 630
     t.window.highdpi = true
-    t.modules.audio, t.modules.physics, t.modules.joystick = false, false, false
+    t.modules.physics, t.modules.joystick = false, false
     if arg and table.concat(arg, " "):find("--test", 1, true) then
         t.window = false
         t.modules.graphics = false
+        t.modules.audio, t.modules.sound = false, false
     end
 end
 

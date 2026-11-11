@@ -10,6 +10,8 @@ local function click(ui, id)
             local scale = math.min(w / 1280, h / 840)
             love.mousepressed((w - 1280 * scale) / 2 + (rect.x + rect.w / 2) * scale,
                 (h - 840 * scale) / 2 + (rect.y + rect.h / 2) * scale, 1)
+            love.mousereleased((w - 1280 * scale) / 2 + (rect.x + rect.w / 2) * scale,
+                (h - 840 * scale) / 2 + (rect.y + rect.h / 2) * scale, 1)
             return
         end
     end
@@ -51,6 +53,8 @@ function Smoke.step(frame, ui)
         local w, h = love.graphics.getDimensions()
         local scale = math.min(w / 1280, h / 840)
         love.mousepressed((w - 1280 * scale) / 2 + (rect.x + rect.w / 2) * scale,
+            (h - 840 * scale) / 2 + (rect.y + rect.h / 2) * scale, 1)
+        love.mousereleased((w - 1280 * scale) / 2 + (rect.x + rect.w / 2) * scale,
             (h - 840 * scale) / 2 + (rect.y + rect.h / 2) * scale, 1)
         assert(ui.run.phase == "ready" and #ui.run.discards == 1)
     elseif frame == 12 then
@@ -113,6 +117,8 @@ function Smoke.step(frame, ui)
         love.keypressed("return", "return", false)
     elseif frame == 46 then
         love.keypressed("return", "return", false)
+    elseif frame == 47 then
+        click(ui,"archive")
     elseif frame == 48 then
         love.mouse.setPosition(1000, 600)
         love.wheelmoved(0, -100)
@@ -150,7 +156,64 @@ function Smoke.step(frame, ui)
     elseif frame == 64 then
         click(ui, "start")
         assert(ui.run.draws == Config.draws and #ui.run.discards == 0)
-        print("UI SMOKE PASSED: build/seed selection, draw/discard, preview, settlements, failure/retry, victory, next seed, resize, all-discard scrolling, yaku rendering")
+    elseif frame == 66 then
+        click(ui,"details")
+    elseif frame == 67 then
+        assert(ui.tableScene.detail)
+        love.graphics.captureScreenshot("smoke-receipt.png")
+    elseif frame == 68 then
+        love.keypressed("escape","escape",false)
+        assert(not ui.tableScene.detail and ui.screen=="game")
+    elseif frame == 69 then
+        love.keypressed("space","space",false)
+    elseif frame == 72 then
+        local r=ui.tileRects[1]
+        love.mousepressed(r.x+r.w/2,r.y+r.h/2,1)
+        love.mousemoved(30,230)
+        love.mousereleased(30,230,1)
+        assert(ui.run.phase=="discard" and #ui.run.discards==0,"Invalid drop must cancel")
+    elseif frame == 74 then
+        local r=ui.tileRects[2]
+        love.mousepressed(r.x+r.w/2,r.y+r.h/2,1)
+        love.mousemoved(640,375)
+        assert(ui.tableScene.drag and ui.tableScene.drag.moved)
+        assert(ui.hoverScore,"Dragging a newly selected tile must retain its discard preview")
+    elseif frame == 75 then
+        love.graphics.captureScreenshot("smoke-drag.png")
+    elseif frame == 76 then
+        love.mousereleased(640,375,1)
+        assert(ui.run.phase=="ready" and #ui.run.discards==1,"Valid drag must discard once")
+    elseif frame == 80 then
+        click(ui,"sound"); assert(ui.tableScene.feedback.muted)
+    elseif frame == 82 then
+        click(ui,"sound"); assert(not ui.tableScene.feedback.muted)
+    elseif frame == 84 then
+        click(ui,"motion"); assert(ui.tableScene.feedback.reduced)
+    elseif frame == 86 then
+        love.keypressed("space","space",false)
+        assert(#ui.tableScene.feedback.flights==0,"Reduced motion must skip flights")
+    elseif frame == 88 then
+        local r=ui.tileRects[15]
+        love.mousepressed(r.x+r.w/2,r.y+r.h/2,1)
+        love.mousereleased(r.x+r.w/2,r.y+r.h/2,1)
+        assert(ui.run.phase=="ready" and #ui.run.discards==2)
+    elseif frame == 92 then
+        click(ui,"motion"); assert(not ui.tableScene.feedback.reduced)
+    elseif frame == 110 then
+        assert(#ui.tableScene.feedback.flights==0,"Visual feedback must settle")
+        love.graphics.captureScreenshot(function(data)
+            local w,h=data:getDimensions()
+            local bright,total=0,0
+            for y=math.floor(h*525/840),math.floor(h*605/840),4 do
+                for x=math.floor(w*150/1280),math.floor(w*1130/1280),4 do
+                    local r,g,b=data:getPixel(x,y)
+                    if r+g+b>1.9 then bright=bright+1 end
+                    total=total+1
+                end
+            end
+            assert(bright/total>.4,"Tile-face textures disappeared after window resize")
+            print("UI SMOKE PASSED: original loop, perspective picking, click/drag/cancel, receipt/archive, resize textures, mute, reduced motion, overlapping feedback")
+        end)
     end
 end
 

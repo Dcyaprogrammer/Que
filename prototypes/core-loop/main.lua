@@ -1,16 +1,14 @@
 local Config, Rules, Run = require("config"), require("rules"), require("run")
+local Tabletop = require("tabletop")
+local scene
 local W, H = 1280, 840
 local ui = { screen = "setup", build = 1, seed = 1, buttons = {}, tileRects = {}, discardScroll = 0 }
 local fonts, options, frames = {}, {}, 0
 local palette = {
     background = { .035, .10, .10 }, panel = { .065, .16, .155 },
     ink = { .91, .92, .84 }, muted = { .56, .70, .65 }, gold = { .94, .73, .36 },
-    tile = { .94, .91, .80 }, dark = { .08, .15, .14 },
-    red = { .65, .20, .20 }, green = { .12, .42, .32 }, blue = { .16, .32, .52 },
+    dark = { .08, .15, .14 },
 }
-local groupColors = { { .85, .55, .30 }, { .38, .70, .56 }, { .45, .65, .84 },
-    { .76, .54, .77 }, { .87, .77, .40 }, { .49, .77, .76 }, { .75, .75, .65 } }
-local groupNames = { pair = "对子", sequence = "顺子", triplet = "刻子" }
 
 local function color(value) love.graphics.setColor(value) end
 local function text(value, x, y, size, tint, width, align)
@@ -32,7 +30,7 @@ local function coordinates(x, y)
 end
 
 local function contains(rect, x, y)
-    return x >= rect.x and x <= rect.x + rect.w and y >= rect.y and y <= rect.y + rect.h
+    return Tabletop.hit(rect, x, y)
 end
 
 local function button(id, label, x, y, w, h, enabled, action, selected)
@@ -71,13 +69,17 @@ end
 local function start()
     ui.run = Run.new(Config.seeds[ui.seed], Config.builds[ui.build], Config)
     ui.screen, ui.discardScroll, ui.hoverScore, ui.hoverId = "game", 0, nil, nil
-    ui.notice = nil
+    ui.notice, ui.hoverIndex = nil, nil
+    if scene then scene:reset() end
     flushLog()
 end
 
 local function act(method, ...)
+    local before = {}
+    for i, tile in ipairs(ui.run.hand) do before[i] = tile end
     if ui.run[method](ui.run, ...) then
-        ui.hoverScore, ui.hoverId = nil, nil
+        scene:onAction(method, before, ui.run, ...)
+        ui.hoverScore, ui.hoverId, ui.hoverIndex = nil, nil, nil
         if method == "settle" then
             ui.notice = "上次结算 +" .. ui.run.lastResult.total
         else ui.notice = nil end
@@ -85,23 +87,13 @@ local function act(method, ...)
     end
 end
 
-local function tileFace(tile, x, y, w, h, small, tint, label)
-    box(x, y + (small and 2 or 5), w, h, { .20, .32, .28 }, small and 3 or 7)
-    box(x, y, w, h, tint or palette.tile, small and 3 or 7)
-    local kind = tile.kind
-    local tileColor = kind <= 27 and ({ palette.red, palette.blue, palette.green })[Rules.suit(kind)]
-        or (kind >= 32 and palette.red or palette.dark)
-    if small then
-        text(Rules.label(kind), x, y + 6, 14, tileColor, w, "center")
-    else
-        local face = kind <= 27 and tostring(Rules.rank(kind)) or Rules.label(kind)
-        text(face, x, y + 12, 32, tileColor, w, "center")
-        if kind <= 27 then
-            text(({ "万", "筒", "索" })[Rules.suit(kind)], x, y + 49, 20, tileColor, w, "center")
-        end
-        text(label or (Rules.value(tile, ui.run.build, Config) .. "分"), x, y + h - 24, 14, palette.dark, w, "center")
-    end
-end
+local actions = {
+    draw = function() act("draw") end,
+    settle = function() act("settle") end,
+    menu = function() ui.screen = "setup"; scene.drag = nil end,
+    retry = start,
+    nextseed = function() ui.seed = ui.seed % #Config.seeds + 1; start() end,
+}
 
 local function drawSetup()
     text("QUE", 48, 36, 48, palette.gold)
@@ -131,117 +123,6 @@ local function drawSetup()
     button("start", "开始这一关  →", 48, 691, 320, 58, true, start, true)
     text("点击摸牌 → 点击一张牌弃掉 → 随时结算整手牌", 403, 707, 20, palette.muted)
     text("原型参数可调 · 四种役：断幺九 / 三元牌刻子 / 对对和 / 清一色", 48, 790, 16, palette.muted)
-end
-
-local function drawScore(result, x, y)
-    if not result then
-        text("先弃掉一张牌", x, y + 15, 32)
-        text("将鼠标移到牌上，预览弃掉它之后的得分。", x, y + 72, 20, palette.muted)
-        return
-    end
-    text("(" .. result.base .. " 单牌 + " .. result.bonus .. " 组合 + " .. result.item .. " 道具) × " .. result.multiplier,
-        x, y, 20, palette.muted)
-    text(result.total, x, y + 31, 48, palette.gold)
-    local status = result.winning and table.concat(result.yaku, " / ")
-        or (result.complete and "结构完整 · 无役，按普通手牌计分" or "普通手牌 · 不必胡牌也能结算")
-    text(status, x + 184, y + 51, 20, palette.ink, 540)
-    local labels = {}
-    for i, group in ipairs(result.groups) do
-        local names = {}
-        for _, tile in ipairs(group.tiles) do names[#names + 1] = Rules.label(tile.kind) end
-        labels[#labels + 1] = { text = i .. "  " .. table.concat(names, " ") .. "  " .. groupNames[group.kind]
-            .. "  +" .. group.bonus .. (group.item > 0 and (" / 道具 +" .. group.item) or ""), color = groupColors[i] }
-    end
-    for i, label in ipairs(labels) do text(label.text, x, y + 103 + (i - 1) * 25, 16, label.color) end
-end
-
-local function drawDiscards(run)
-    local x, y, w, h = 860, 430, 372, 350
-    box(x, y, w, h)
-    text("弃牌区  /  " .. #run.discards .. " 张", x + 20, y + 16, 20)
-    local columns, rowHeight, visibleHeight = 10, 38, 260
-    local rows = math.ceil(#run.discards / columns)
-    ui.maxScroll = math.max(0, rows * rowHeight - visibleHeight)
-    ui.discardScroll = math.max(0, math.min(ui.maxScroll, ui.discardScroll))
-    local width, height = love.graphics.getDimensions()
-    local scale = math.min(width / W, height / H)
-    love.graphics.setScissor((width - W * scale) / 2 + (x + 16) * scale,
-        (height - H * scale) / 2 + (y + 56) * scale, (w - 32) * scale, visibleHeight * scale)
-    for i, tile in ipairs(run.discards) do
-        local row, col = math.floor((i - 1) / columns), (i - 1) % columns
-        tileFace(tile, x + 20 + col * 33, y + 56 + row * rowHeight - ui.discardScroll, 29, 31, true)
-    end
-    love.graphics.setScissor()
-    if #run.discards == 0 then text("本关弃牌都会保留在这里", x + 20, y + 75, 16, palette.muted) end
-    text(ui.maxScroll > 0 and "在此滚动，查看全部弃牌 ↑↓" or "换牌与结算弃牌 · 本关不再抽回",
-        x + 20, y + h - 26, 14, palette.muted)
-end
-
-local function drawGame()
-    local run, active = ui.run, ui.run.phase == "ready" or ui.run.phase == "discard"
-    text("QUE", 48, 27, 32, palette.gold)
-    text(run.build.name .. "  /  SEED " .. run.seed, 156, 36, 20, palette.muted)
-    button("menu", "返回构筑选择", 1022, 24, 210, 40, true, function() ui.screen = "setup" end)
-    box(48, 93, 1184, 99)
-    text("累计 / 目标", 70, 108, 16, palette.muted)
-    text(run.total .. " / " .. Config.target, 70, 136, 32)
-    text("剩余换牌", 493, 109, 16, palette.muted); text(run.draws, 493, 138, 24)
-    text("剩余结算", 711, 109, 16, palette.muted); text(run.settlements, 711, 138, 24)
-    text("牌山", 938, 109, 16, palette.muted); text(#run.wall .. " 张", 938, 138, 24)
-    local fraction = math.min(1, run.total / Config.target)
-    box(70, 182, 1138 * fraction, 3, palette.gold, 0)
-
-    local handTitle = run.phase == "discard" and "摸牌后 · 点击一张牌弃掉"
-        or (active and "当前手牌 · 彩色标记对应下方计分组合" or "整手牌已移入弃牌区")
-    text(handTitle, 48, 211, 20)
-    local preview = run.preview
-    if run.phase == "discard" and ui.hoverScore then preview = ui.hoverScore end
-    local membership = {}
-    if preview then
-        for i, group in ipairs(preview.groups) do
-            for _, tile in ipairs(group.tiles) do membership[tile.id] = i end
-        end
-    end
-    local mx, my = coordinates(love.mouse.getPosition())
-    for i, tile in ipairs(run.hand) do
-        local rect = { x = 48 + (i - 1) * 78, y = 254, w = 68, h = 98, index = i }
-        ui.tileRects[#ui.tileRects + 1] = rect
-        local hovered = run.phase == "discard" and contains(rect, mx, my)
-        local y = rect.y - (hovered and 8 or 0)
-        tileFace(tile, rect.x, y, rect.w, rect.h, false, hovered and palette.gold or nil)
-        local groupIndex = membership[tile.id]
-        if groupIndex then
-            box(rect.x, y, rect.w, 5, groupColors[groupIndex], 0)
-            text(groupIndex, rect.x + 5, y + 4, 14, palette.dark)
-        end
-        if tile.id == run.drawnId then text("新摸", rect.x, y - 24, 14, palette.gold, rect.w, "center") end
-    end
-    if active then
-        button("draw", "摸一张  [空格]", 48, 375, 210, 44,
-            run.phase == "ready" and run.draws > 0 and #run.wall > 0, function() act("draw") end)
-        button("settle", "结算整手  [回车]", 278, 375, 245, 44,
-            run.phase == "ready", function() act("settle") end, run.phase == "ready")
-        local hint = run.phase == "discard" and "先弃牌，再结算。摸切也可以。"
-            or (ui.notice or "换牌与结算次数在三手之间共享。")
-        text(hint, 555, 387, 20, palette.muted)
-    else
-        text(run.phase == "won" and "本关达成" or "本关结束", 48, 257, 48,
-            run.phase == "won" and palette.gold or palette.ink)
-        text(run.reason, 365, 278, 20, palette.muted)
-        button("retry", "同配置再试  [R]", 48, 375, 250, 44, true, start, true)
-        button("nextseed", "下一个种子", 318, 375, 210, 44, true, function()
-            ui.seed = ui.seed % #Config.seeds + 1; start()
-        end)
-    end
-    box(48, 430, 788, 350)
-    text(active and (ui.hoverScore and "弃掉这张后的预览" or "当前得分预览") or "最后一次结算", 70, 447, 20)
-    ui.displayScore = preview
-    if not active then ui.displayScore = run.lastResult end
-    drawScore(ui.displayScore, 70, 482)
-    drawDiscards(run)
-    text("单牌 " .. Config.tileBase .. "  ·  对子 +" .. Config.pairBonus .. "  ·  顺子 +" .. Config.sequenceBonus
-        .. "  ·  刻子 +" .. Config.tripletBonus .. "  ·  胡牌倍率 1 + 役项数", 48, 799, 14, palette.muted)
-    if ui.logError then text("试玩日志写入失败", 1020, 799, 14, palette.gold) end
 end
 
 local function loadFonts()
@@ -278,6 +159,8 @@ function love.load(args)
         return
     end
     loadFonts()
+    scene = Tabletop.new(fonts)
+    ui.tableScene = scene
     if options.play then start() end
     print("QUE READY | save=" .. love.filesystem.getSaveDirectory())
 end
@@ -291,32 +174,45 @@ function love.draw()
     love.graphics.translate((width - W * scale) / 2, (height - H * scale) / 2)
     love.graphics.scale(scale)
     ui.buttons, ui.tileRects = {}, {}
-    if ui.screen == "setup" then drawSetup() else drawGame() end
+    if ui.screen == "setup" then drawSetup() else scene:draw(ui, actions) end
     love.graphics.pop()
 end
 
 function love.mousepressed(x, y, mouseButton)
     if mouseButton ~= 1 then return end
     x, y = coordinates(x, y)
-    for _, rect in ipairs(ui.buttons) do
+    if ui.screen == "game" and scene:press(ui, x, y) then return end
+    for i = #ui.buttons, 1, -1 do
+        local rect = ui.buttons[i]
         if rect.enabled and contains(rect, x, y) then rect.action(); return end
-    end
-    if ui.screen == "game" and ui.run.phase == "discard" then
-        for _, rect in ipairs(ui.tileRects) do
-            if contains(rect, x, y) then act("discard", rect.index); return end
-        end
     end
 end
 
-function love.mousemoved(x, y)
-    if ui.screen ~= "game" or ui.run.phase ~= "discard" then return end
+function love.mousereleased(x, y, mouseButton)
+    if ui.screen ~= "game" then return end
     x, y = coordinates(x, y)
+    if mouseButton == 1 then
+        scene:release(ui, x, y, function(index) act("discard", index) end)
+    elseif mouseButton == 2 then scene:escape() end
+end
+
+function love.mousemoved(x, y)
+    if ui.screen ~= "game" then return end
+    x, y = coordinates(x, y)
+    scene:move(x, y)
+    if scene.detail or scene.archive then return end
     local index
-    for _, rect in ipairs(ui.tileRects) do if contains(rect, x, y) then index = rect.index; break end end
+    if scene.drag then index = scene.drag.index
+    else
+        for i = #ui.tileRects, 1, -1 do
+            if contains(ui.tileRects[i], x, y) then index = ui.tileRects[i].index; break end
+        end
+    end
+    ui.hoverIndex = index
     local id = index and ui.run.hand[index].id
-    if id == ui.hoverId then return end
+    if id == ui.hoverId and (ui.run.phase ~= "discard" or ui.hoverScore ~= nil) then return end
     ui.hoverId, ui.hoverScore = id, nil
-    if index then
+    if index and ui.run.phase == "discard" then
         local hand = {}
         for i, tile in ipairs(ui.run.hand) do if i ~= index then hand[#hand + 1] = tile end end
         ui.hoverScore = Rules.score(hand, ui.run.build, Config)
@@ -326,14 +222,19 @@ end
 function love.wheelmoved(_, y)
     if ui.screen ~= "game" then return end
     local mx, my = coordinates(love.mouse.getPosition())
-    if mx >= 860 and mx <= 1232 and my >= 430 and my <= 780 then
+    if scene.archive and mx >= 823 and mx <= 1233 and my >= 230 and my <= 684 then
         ui.discardScroll = math.max(0, math.min(ui.maxScroll or 0, ui.discardScroll - y * 38))
     end
 end
 
 function love.keypressed(key, _, isRepeat)
     if isRepeat then return end
-    if key == "escape" then ui.screen = "setup"
+    if key == "m" and scene then scene.feedback:mute(); return end
+    if key == "v" and scene then scene.feedback:reduce(); return end
+    if key == "escape" then
+        if ui.screen == "game" and scene:escape() then return end
+        ui.screen = "setup"
+    elseif ui.screen == "game" and (scene.detail or scene.archive) then return
     elseif ui.screen == "setup" then
         if key == "return" then start() end
     elseif key == "space" then act("draw")
@@ -341,9 +242,13 @@ function love.keypressed(key, _, isRepeat)
     elseif key == "r" and (ui.run.phase == "won" or ui.run.phase == "lost") then start() end
 end
 
-function love.update()
+function love.update(dt)
     if options.test then return end
     frames = frames + 1
+    if ui.screen == "game" then
+        local mx, my = coordinates(love.mouse.getPosition())
+        scene:update(dt, mx, my)
+    end
     if options.smoke then require("ui_smoke").step(frames, ui, start) end
     if options.frames and frames == options.frames and options.shot then
         love.graphics.captureScreenshot(options.shot)

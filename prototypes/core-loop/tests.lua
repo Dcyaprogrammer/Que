@@ -61,6 +61,35 @@ local function validGroups(result)
 end
 
 function Tests.run()
+    local Tabletop, Feedback = require("tabletop"), require("table_feedback")
+    local trapezoid = Tabletop.bounds({ 0,0, 2,0, 3,2, -1,2 })
+    assert(Tabletop.hit(trapezoid,1,1) and Tabletop.hit(trapezoid,0,0))
+    assert(not Tabletop.hit(trapezoid,-.8,.2), "Picking must follow the polygon, not its bounding box")
+    local view = setmetatable({ offsetX = 2, offsetY = -1 }, Tabletop)
+    for i = 1, 15 do
+        local pose = view:handPose(i)
+        local rect = Tabletop.bounds(pose)
+        assert(rect.x >= 0 and rect.x+rect.w <= 1280 and rect.y >= 0 and rect.y+rect.h <= 840)
+        assert(Tabletop.hit(rect,rect.x+rect.w/2,rect.y+rect.h/2))
+    end
+    local near = Tabletop.project(100,0,50)
+    local far = Tabletop.project(100,0,800)
+    assert(near > far, "Perspective must make nearby objects larger")
+    local feedback = Feedback.new(false)
+    local a,b = {0,0,20,0,20,30,0,30}, {50,50,70,50,70,80,50,80}
+    feedback:spawn({id=1,kind=1},a,b,.2)
+    feedback:update(.05)
+    local interrupted = Feedback.pose(feedback.flights[1])
+    feedback:spawn({id=1,kind=1},a,b,.3)
+    equal(#feedback.flights,1)
+    equal(feedback.flights[1].from[1],interrupted[1],"Overlapping feedback starts from the visible position")
+    feedback.target = 850
+    for _ = 1, 200 do feedback:update(.02) end
+    equal(#feedback.flights,0); equal(feedback.score,850)
+    feedback:spawn({id=2,kind=2},a,b,.2)
+    feedback:reduce(); equal(#feedback.flights,0)
+    feedback:spawn({id=3,kind=3},a,b,.2); equal(#feedback.flights,0)
+    print("PASS tabletop: perspective, polygon picking, overlapping animation, rest state, reduced motion")
     local plain = { id = "plain" }
     local noYaku = hand({ 1,2,3, 4,5,6, 16,17,18, 20,21,22, 28,28 })
     local score = Rules.score(noYaku, plain, Config)
