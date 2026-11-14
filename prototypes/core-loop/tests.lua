@@ -71,6 +71,25 @@ function Tests.run()
         local rect = Tabletop.bounds(pose)
         assert(rect.x >= 0 and rect.x+rect.w <= 1280 and rect.y >= 0 and rect.y+rect.h <= 840)
         assert(Tabletop.hit(rect,rect.x+rect.w/2,rect.y+rect.h/2))
+        local width=((pose[3]-pose[1])+(pose[5]-pose[7]))/2
+        local height=(pose[6]+pose[8]-pose[2]-pose[4])/2
+        assert(height/width>=1.2 and height/width<=1.6,"Hand tiles must not look stretched")
+        local lean=math.abs((pose[1]+pose[3]-pose[5]-pose[7])/2)
+        assert(lean/height<.27,"Outer hand tiles must not lean excessively")
+        local raised=Tabletop.bounds(view:handPose(i,9))
+        assert(raised.x>=0 and raised.x+raised.w<=1280,"Hovered tiles must remain on screen")
+    end
+    local wall=Tabletop.bounds(view:wallTilePose(9,2))
+    assert(wall.w>=33 and wall.h>=16,"Far wall tiles must remain large enough to read and click")
+    local drawRun=Run.new(1126,Config.builds[1],Config)
+    view.feedback=Feedback.new(false)
+    for _,level in ipairs({2,1}) do
+        assert(drawRun:draw())
+        view:onAction("draw",{},drawRun)
+        local source=view:wallTilePose(61,level)
+        local flight=view.feedback.flights[#view.feedback.flights]
+        for i=1,8 do equal(flight.from[i],source[i],"Draw from the visible stack layer") end
+        assert(drawRun:discard(15))
     end
     local near = Tabletop.project(100,0,50)
     local far = Tabletop.project(100,0,800)

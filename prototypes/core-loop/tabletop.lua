@@ -2,7 +2,9 @@ local Rules, Config = require("rules"), require("config")
 local Art, Feedback = require("table_art"), require("table_feedback")
 local Table = {}
 Table.__index = Table
-local sin, cos = math.sin(math.rad(50)), math.cos(math.rad(50))
+local sin, cos = math.sin(math.rad(25)), math.cos(math.rad(25))
+local handWidth, handHeight, handDepth, handZ = 52, 90, 14, -90
+local wallWidth, wallLength, wallLayer = 52, 76, 18
 local C = { ivory = { .94, .90, .79 }, ink = { .18, .20, .15 },
     brass = { .70, .53, .29 }, gold = { .95, .73, .38 }, muted = { .64, .66, .51 },
     dark = { .045, .065, .05 }, red = { .66, .15, .11 }, green = { .08, .28, .20 } }
@@ -11,8 +13,8 @@ local marks = { { .70,.32,.20 }, { .20,.49,.36 }, { .21,.39,.62 }, { .52,.32,.55
     { .65,.51,.18 }, { .21,.51,.51 }, { .48,.46,.35 } }
 
 function Table.project(x, height, depth)
-    local d = (600 - height) * sin + (depth + 550) * cos
-    return 640 + 1050 * x / d, 740 - 1050 * ((height - 600) * cos + (depth + 550) * sin) / d
+    local d = (600 - height) * sin + (depth + 850) * cos
+    return 640 + 1250 * x / d, 340 - 1250 * ((height - 600) * cos + (depth + 850) * sin) / d
 end
 
 function Table.bounds(quad)
@@ -44,6 +46,9 @@ function Table.hit(rect, x, y)
 end
 
 local function rgba(tint, alpha) love.graphics.setColor(tint[1], tint[2], tint[3], alpha or 1) end
+local function heldPose(x,y)
+    return {x-36,y-50,x+36,y-50,x+36,y+50,x-36,y+50}
+end
 local function rectangle(x, y, w, h, tint, radius)
     rgba(tint); love.graphics.rectangle("fill", x, y, w, h, radius or 0, radius or 0)
 end
@@ -105,16 +110,23 @@ function Table:reset()
 end
 
 function Table:handPose(index, raise)
-    local x = index == 15 and 424 or -360 + (index - 1) * 54
-    local h, z = 125 + (raise or 0), 80
-    return self:quad({ {x-25,h,z}, {x+25,h,z}, {x+25,raise or 0,z}, {x-25,raise or 0,z} }), x
+    local x = index == 15 and 432 or -351 + (index - 1) * 54
+    local h, half = handHeight + (raise or 0), handWidth / 2
+    return self:quad({ {x-half,h,handZ}, {x+half,h,handZ},
+        {x+half,raise or 0,handZ}, {x-half,raise or 0,handZ} }), x
 end
 
 function Table:wallPose(index)
-    if index <= 17 then return -320 + (index - 1) * 40, 850 end
-    if index <= 27 then return -180 + (index - 18) * 40, 790 end
-    if index <= 44 then return -440, 730 - (index - 28) * 35 end
-    return 440, 730 - (index - 45) * 35
+    if index <= 17 then return -432 + (index - 1) * 54, 870, false end
+    if index <= 34 then return -432 + (index - 18) * 54, 780, false end
+    if index <= 48 then return -470, 680 - (index - 35) * 54, true end
+    return 470, 680 - (index - 49) * 54, true
+end
+
+function Table:wallTilePose(index, level)
+    local x,z,side = self:wallPose(index)
+    return self:flat(x,z,side and wallLength or wallWidth,
+        side and wallWidth or wallLength,level*wallLayer),side
 end
 
 function Table:riverPose(index, count)
@@ -122,15 +134,16 @@ function Table:riverPose(index, count)
     local position = index - (count - visible) - 1
     if position < 0 then return nil end
     local col, row = position % 8, math.floor(position / 8)
-    return self:flat(-155 + col * 44, 515 - row * 68, 34, 51, 11)
+    return self:flat(-196 + col * 56, 515 - row * 80, wallWidth, wallLength, 11)
 end
 
-function Table:drawFlat(tile, quad, back, alpha)
+function Table:drawFlat(tile, quad, back, alpha, side)
     local bottom = {}
     for i = 1, 8, 2 do bottom[i], bottom[i+1] = quad[i], quad[i+1] + 5 end
     self:surface({ quad[7],quad[8],quad[5],quad[6],bottom[5],bottom[6],bottom[7],bottom[8] },
         { .55,.53,.39 }, nil, alpha)
-    self:surface(quad, nil, back and self.art.back or self.art.faces[tile.kind], alpha)
+    self:surface(quad, nil, back and (side and self.art.backSide or self.art.back)
+        or self.art.faces[tile.kind], alpha)
 end
 
 function Table:drawRoom()
@@ -141,13 +154,13 @@ function Table:drawRoom()
         love.graphics.rectangle("fill", 0, y, 1280, 4)
     end
     for x = 20, 1280, 110 do rectangle(x, 0, 3, 250, { .095,.095,.06 }) end
-    self:surface(self:quad({{-560,0,950},{560,0,950},{560,0,-40},{-560,0,-40}}), nil, self.art.wood)
-    self:surface(self:quad({{-560,0,-40},{560,0,-40},{560,-75,-40},{-560,-75,-40}}), { .23,.11,.055 })
-    self:surface(self:flat(0,460,1020,880), nil, self.art.felt)
+    self:surface(self:quad({{-560,0,950},{560,0,950},{560,0,-180},{-560,0,-180}}), nil, self.art.wood)
+    self:surface(self:quad({{-560,0,-180},{560,0,-180},{560,-55,-180},{-560,-55,-180}}), { .23,.11,.055 })
+    self:surface(self:flat(0,380,1000,1040), nil, self.art.felt)
     rgba({ .41,.40,.21 }); love.graphics.setLineWidth(2)
-    love.graphics.polygon("line", self:flat(0,460,1000,860))
+    love.graphics.polygon("line", self:flat(0,380,980,1020))
     rgba({ .075,.19,.14 }); love.graphics.setLineWidth(2)
-    love.graphics.polygon("line", self:flat(0,460,970,830))
+    love.graphics.polygon("line", self:flat(0,380,950,990))
     love.graphics.setBlendMode("alpha","premultiplied")
     love.graphics.setColor(.7,.7,.7,.7); love.graphics.draw(self.art.light)
     love.graphics.setBlendMode("alpha")
@@ -187,11 +200,10 @@ end
 function Table:drawWall(ui, actions)
     local count = #ui.run.wall
     for stack = 1, math.ceil(count / 2) do
-        local x,z = self:wallPose(stack)
         local levels = math.min(2, count - (stack-1)*2)
         for level = 1, levels do
-            local quad = self:flat(x,z,32,47,level*13)
-            self:drawFlat({kind=1},quad,true)
+            local quad,side = self:wallTilePose(stack,level)
+            self:drawFlat({kind=1},quad,true,nil,side)
             self:hotspot(ui,"draw",Table.bounds(quad),ui.run.phase=="ready" and ui.run.draws>0,
                 actions.draw)
         end
@@ -236,16 +248,18 @@ function Table:drawHand(ui)
         local selected=ui.hoverId==tile.id
         local raise=selected and not self.feedback.reduced and 9 or 0
         local pose,x=self:handPose(index,raise)
-        local shadow=self:flat(x,100,60,37)
+        local shadow=self:flat(x,handZ+18,handWidth+8,37)
         self:surface(shadow,{0,0,0},nil,.22)
         self.poses[tile.id]=pose
         local visiblePose=flying[tile.id] and Feedback.pose(flying[tile.id]) or pose
         local rect=Table.bounds(visiblePose); rect.index,rect.tileId=index,tile.id
         ui.tileRects[#ui.tileRects+1]=rect
         if not flying[tile.id] and not (self.drag and self.drag.id==tile.id) then
-            local h=125+raise
-            self:surface(self:quad({{x-25,h,80},{x+25,h,80},{x+25,h,94},{x-25,h,94}}),{.95,.91,.78})
-            self:surface(self:quad({{x+25,h,80},{x+25,h,94},{x+25,raise,94},{x+25,raise,80}}),{.59,.64,.47})
+            local h,half,z=handHeight+raise,handWidth/2,handZ
+            self:surface(self:quad({{x-half,h,z},{x+half,h,z},
+                {x+half,h,z+handDepth},{x-half,h,z+handDepth}}),{.95,.91,.78})
+            self:surface(self:quad({{x+half,h,z},{x+half,h,z+handDepth},
+                {x+half,raise,z+handDepth},{x+half,raise,z}}),{.59,.64,.47})
             self:surface(pose,nil,self.art.faces[tile.kind])
             if membership[tile.id] then
                 local m=membership[tile.id]
@@ -387,8 +401,7 @@ function Table:draw(ui,actions)
     end
     if self.drag then
         local drag=self.drag
-        self:surface({drag.x-31,drag.y-56,drag.x+31,drag.y-56,drag.x+31,drag.y+56,drag.x-31,drag.y+56},
-            nil,self.art.faces[drag.tile.kind])
+        self:surface(heldPose(drag.x,drag.y),nil,self.art.faces[drag.tile.kind])
     end
     self:drawControls(ui,actions)
     if self.feedback.stampTime>0 then
@@ -403,15 +416,16 @@ function Table:onAction(method,before,run,index)
     self.detail,self.archive=false,false
     if method=="draw" then
         local tile=run.hand[15]
-        local x,z=self:wallPose(math.max(1,math.ceil((#run.wall+1)/2)))
-        self.feedback:spawn(tile,self:flat(x,z,32,47,26),self:handPose(15),.30,false,true)
+        local count=#run.wall+1
+        local source=self:wallTilePose(math.ceil(count/2),count%2==0 and 2 or 1)
+        self.feedback:spawn(tile,source,self:handPose(15),.30,false,true)
         self.feedback:play("tile")
     elseif method=="discard" then
         local tile=before[index]
         local from=self.poses[tile.id] or self:handPose(index)
         if self.drag then
             local x,y=self.drag.x,self.drag.y
-            from={x-31,y-56,x+31,y-56,x+31,y+56,x-31,y+56}
+            from=heldPose(x,y)
         end
         self.feedback:spawn(tile,from,self:riverPose(#run.discards,#run.discards),.24)
     elseif method=="settle" then
@@ -420,9 +434,10 @@ function Table:onAction(method,before,run,index)
             self.feedback:spawn(tile,self.poses[tile.id] or self:handPose(i),
                 self:flat((i-7.5)*26,510,30,46,12),.30+i*.012,true)
         end
-        local x,z=self:wallPose(math.max(1,math.ceil(#run.wall/2)))
         for i,tile in ipairs(run.hand) do
-            self.feedback:spawn(tile,self:flat(x,z,32,47,26),self:handPose(i),.32+i*.012,false,true)
+            local count=#run.wall+#run.hand-i+1
+            local source=self:wallTilePose(math.ceil(count/2),count%2==0 and 2 or 1)
+            self.feedback:spawn(tile,source,self:handPose(i),.32+i*.012,false,true)
         end
         self.feedback.target,self.feedback.stamp,self.feedback.stampTime=run.total,run.lastResult.total,1.1
     end
@@ -462,7 +477,7 @@ function Table:release(ui,x,y,discard)
         discard(drag.index)
     else
         local to=self:handPose(drag.index)
-        self.feedback:spawn(drag.tile,{x-31,y-56,x+31,y-56,x+31,y+56,x-31,y+56},to,.18)
+        self.feedback:spawn(drag.tile,heldPose(x,y),to,.18)
         self.drag=nil
     end
 end
